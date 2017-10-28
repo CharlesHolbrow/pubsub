@@ -106,6 +106,24 @@ func (ps *PubSub) Unsubscribe(agent Agent, key string) {
 	ps.lock.Unlock()
 }
 
+func (ps *PubSub) RemoveAgent(agent Agent) error {
+	ps.lock.Lock()
+	agentID := agent.ID()
+	list, found := ps.lists[agentID]
+
+	if !found {
+		return fmt.Errorf("Tried to remove agent (ID: %s) from all subscriptions, but subscription list not found", agentID)
+	}
+
+	for _, psChan := range list {
+		delete(psChan, agentID)
+	}
+	delete(ps.lists, agentID)
+	ps.lock.Unlock()
+
+	return nil
+}
+
 // func (ps *PubSub) AddSubscriber(sKey string, client Subscriber) {
 // 	subscribersps.channels.LoadOrStore(sKey, sync.Map{}).(sync.Map)
 // }

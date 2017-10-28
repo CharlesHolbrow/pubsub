@@ -78,4 +78,27 @@ func TestPubSub_Subscribe(t *testing.T) {
 	if _, found := ps.lists["c1"]["1|1"]; found {
 		t.Errorf("Tried to unsubscribe, but still found 1|1 in c1 list")
 	}
+
+	// Add a bunch of subscriptions, then remove the agent
+	ps.Subscribe(c1, "0|1")
+	ps.Subscribe(c1, "0|2")
+	ps.Subscribe(c1, "0|3")
+
+	if len(ps.lists["c1"]) != 4 {
+		t.Errorf("Tried to add subscrbiptions to c1. Expected 4, but gor %d", len(ps.lists["c1"]))
+	}
+	if len(ps.lists) != 2 {
+		t.Errorf("Expected there to be two agents total, but found %d", len(ps.lists))
+	}
+	if len(ps.channels["0|1"]) != 1 {
+		t.Errorf("Expected the new 0|1 channel to have 1 agent, but found %d", len(ps.channels["0|1"]))
+	}
+
+	ps.RemoveAgent(c1)
+	if len(ps.lists) != 1 {
+		t.Errorf("Expected there to be only one agent after removing c1, but found %d", len(ps.lists))
+	}
+	if len(ps.channels["0|1"]) != 0 {
+		t.Errorf("Expeted the 0|1 channel to have no agents after removing c1, but found %d", len(ps.channels["0|1"]))
+	}
 }
