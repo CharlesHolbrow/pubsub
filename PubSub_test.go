@@ -85,7 +85,7 @@ func TestPubSub_Subscribe(t *testing.T) {
 	ps.Subscribe(c1, "0|3")
 
 	if len(ps.lists["c1"]) != 4 {
-		t.Errorf("Tried to add subscrbiptions to c1. Expected 4, but gor %d", len(ps.lists["c1"]))
+		t.Errorf("Tried to add subscrbiptions to c1. Expected 4, but got %d", len(ps.lists["c1"]))
 	}
 	if len(ps.lists) != 2 {
 		t.Errorf("Expected there to be two agents total, but found %d", len(ps.lists))

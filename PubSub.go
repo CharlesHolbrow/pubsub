@@ -106,9 +106,17 @@ func (ps *PubSub) Unsubscribe(agent Agent, key string) {
 	ps.lock.Unlock()
 }
 
+// RemoveAgent removes an agent from ps and ubsubscribes it from all channels.
+//
+// Returns an error if the agent was not found in ps.lists
+//
+// It should be called every time an agent disconnects to ensure all traces of
+// the agent are removed from ps.
 func (ps *PubSub) RemoveAgent(agent Agent) error {
-	ps.lock.Lock()
 	agentID := agent.ID()
+
+	ps.lock.Lock()
+
 	list, found := ps.lists[agentID]
 
 	if !found {
@@ -119,15 +127,7 @@ func (ps *PubSub) RemoveAgent(agent Agent) error {
 		delete(psChan, agentID)
 	}
 	delete(ps.lists, agentID)
-	ps.lock.Unlock()
 
+	ps.lock.Unlock()
 	return nil
 }
-
-// func (ps *PubSub) AddSubscriber(sKey string, client Subscriber) {
-// 	subscribersps.channels.LoadOrStore(sKey, sync.Map{}).(sync.Map)
-// }
-
-// type Client struct {
-// 	subscriptions map[string]sync.Map
-// }
