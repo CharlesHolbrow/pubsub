@@ -1,12 +1,12 @@
 package pubsub
 
 import (
+	"fmt"
 	"sync"
 )
 
-// Subscriber is any object that can we can send messages to
-// Better way - just use RW Mutex and regular maps
-type Subscriber interface {
+// Agent represents an object that can Subscribe to PubSub channels
+type Agent interface {
 	Send(string) error
 	ID() string
 }
@@ -17,25 +17,27 @@ type PubSub struct {
 	// The subscription channels by subKey
 	channels map[string]pubSubChannel
 
-	// subscribers by their IDs. Note that these are different than the
-	// Subscriber interface. These are just a collection of pubSubChannels
-	subscribers map[string]pubSubSubscriber
+	// lists of subscriptions by their agent's IDs. Note that these are different
+	// than the Subscriber interface. These are just a collection of
+	// pubSubChannels
+	lists map[string]pubSubList
 
 	lock sync.RWMutex
 }
 
+// NewPubSub creates a PubSub message broker
 func NewPubSub() *PubSub {
 	return &PubSub{
-		channels:    make(map[string]pubSubChannel),
-		subscribers: make(map[string]pubSubSubscriber),
+		channels: make(map[string]pubSubChannel),
+		lists:    make(map[string]pubSubList),
 	}
 }
 
 // pubSubChannel is a collection of subscribers organized by subscription key
-type pubSubChannel map[string]Subscriber
+type pubSubChannel map[string]Agent
 
-// pubSubSubscriber is a collection of channels that a subscriber is subscribed to
-type pubSubSubscriber map[string]pubSubChannel
+// pubSubList is a collection of channels that an agent is subscribed to
+type pubSubList map[string]pubSubChannel
 
 // Publish calls subscriber.Send(message) on each subscriber in the subscription
 // channel identified by sKey. Safe for concurrent calls.
@@ -51,7 +53,7 @@ func (ps *PubSub) Publish(sKey string, message string) {
 }
 
 // Add a client to a subscription key. Assumes you have a write Lock
-func (ps *PubSub) subscribe(key string, subscriber Subscriber) (changed bool) {
+func (ps *PubSub) subscribe(subscriber Agent, key string) error {
 	subscriberID := subscriber.ID()
 	channel, ok := ps.channels[key]
 
@@ -62,26 +64,45 @@ func (ps *PubSub) subscribe(key string, subscriber Subscriber) (changed bool) {
 
 	// check if we are already subscribed
 	if _, ok := channel[subscriberID]; ok {
-		return false
+		return fmt.Errorf("Agent ID %s is already subscribed to %s", subscriberID, key)
 	}
 
 	channel[subscriberID] = subscriber
 	// check if we already have a list of the
-	subscriberSubscriptions, ok := ps.subscribers[subscriberID]
+	subscriberSubscriptions, ok := ps.lists[subscriberID]
 
 	if !ok {
-		subscriberSubscriptions = make(pubSubSubscriber)
-		ps.subscribers[subscriberID] = subscriberSubscriptions
+		subscriberSubscriptions = make(pubSubList)
+		ps.lists[subscriberID] = subscriberSubscriptions
 	}
 
 	subscriberSubscriptions[key] = channel
 
-	return true
+	return nil
 }
 
-func (ps *PubSub) Subscribe(key string, subscriber Subscriber) {
+// Subscribe the supplied Agent to channel identified by key
+func (ps *PubSub) Subscribe(agent Agent, key string) error {
 	ps.lock.Lock()
-	ps.subscribe(key, subscriber)
+	changed := ps.subscribe(agent, key)
+	ps.lock.Unlock()
+	return changed
+}
+
+// assumes you have a write lock
+func (ps *PubSub) unsubscribe(agent Agent, key string) {
+	// list is a collection of all the channels this agent is subscribed to
+	agentID := agent.ID()
+	list := ps.lists[agentID]
+
+	delete(list[key], agentID)
+	delete(list, key)
+}
+
+// Unsubscribe the supplied agent from
+func (ps *PubSub) Unsubscribe(agent Agent, key string) {
+	ps.lock.Lock()
+	ps.unsubscribe(agent, key)
 	ps.lock.Unlock()
 }
 
