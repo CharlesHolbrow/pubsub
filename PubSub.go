@@ -5,9 +5,11 @@ import (
 	"sync"
 )
 
-// Agent represents an object that can Subscribe to PubSub channels
+// Agent represents an object that can Subscribe to PubSub channels.
+// Agents must have a random ID that can be retrieved with ID(). If a client
+// connects, disconnects and re-connects it should have a different ID.
 type Agent interface {
-	Send(string) error
+	Send([]byte) error
 	ID() string
 }
 
@@ -22,14 +24,18 @@ type PubSub struct {
 	// pubSubChannels
 	lists map[string]pubSubList
 
+	// when we publish put all agents that returned errors here
+	badAgents map[string]Agent
+
 	lock sync.RWMutex
 }
 
 // NewPubSub creates a PubSub message broker
 func NewPubSub() *PubSub {
 	return &PubSub{
-		channels: make(map[string]pubSubChannel),
-		lists:    make(map[string]pubSubList),
+		channels:  make(map[string]pubSubChannel),
+		lists:     make(map[string]pubSubList),
+		badAgents: make(map[string]Agent),
 	}
 }
 
@@ -41,15 +47,25 @@ type pubSubList map[string]pubSubChannel
 
 // Publish calls subscriber.Send(message) on each subscriber in the subscription
 // channel identified by sKey. Safe for concurrent calls.
-func (ps *PubSub) Publish(sKey string, message string) {
-	// Get the subscription channel.
+//
+// Returns the number of errors encountered trying to publish.
+//
+// Agents that return a non-nil error on agent.Send() Will be added to an
+// internal 'badAgents' collection.
+func (ps *PubSub) Publish(sKey string, message []byte) int {
 	ps.lock.RLock()
+	badAgentCount := 0
 	if psChannel, ok := ps.channels[sKey]; ok {
-		for _, subscriber := range psChannel {
-			subscriber.Send(message)
+		for id, subscriber := range psChannel {
+			err := subscriber.Send(message)
+			if err != nil {
+				ps.badAgents[id] = subscriber
+				badAgentCount++
+			}
 		}
 	}
 	ps.lock.RUnlock()
+	return badAgentCount
 }
 
 // Add a client to a subscription key. Assumes you have a write Lock
@@ -113,9 +129,16 @@ func (ps *PubSub) Unsubscribe(agent Agent, key string) {
 // It should be called every time an agent disconnects to ensure all traces of
 // the agent are removed from ps.
 func (ps *PubSub) RemoveAgent(agent Agent) error {
-	agentID := agent.ID()
-
 	ps.lock.Lock()
+
+	err := ps.removeAgent(agent)
+
+	ps.lock.Unlock()
+	return err
+}
+
+func (ps *PubSub) removeAgent(agent Agent) error {
+	agentID := agent.ID()
 
 	list, found := ps.lists[agentID]
 
@@ -127,7 +150,29 @@ func (ps *PubSub) RemoveAgent(agent Agent) error {
 		delete(psChan, agentID)
 	}
 	delete(ps.lists, agentID)
-
-	ps.lock.Unlock()
 	return nil
+}
+
+// RemoveAllBadAgents finds all the agents labeled as "bad"
+//
+// Bad agents are returned in a collection, and a new empty badAgent collection
+// is allocated.
+//
+// Returns nil if there are no Bad Agents
+func (ps *PubSub) RemoveAllBadAgents() map[string]Agent {
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+
+	badAgents := ps.badAgents
+	if len(badAgents) == 0 {
+		return nil
+	}
+	ps.badAgents = make(map[string]Agent)
+	for _, agent := range badAgents {
+		// Note that we ignore errors returned by removeAgent. This should be
+		// safe, because the error means that the agent was already removed.
+		ps.removeAgent(agent)
+	}
+
+	return badAgents
 }

@@ -9,7 +9,7 @@ type client struct {
 	id string
 }
 
-func (c *client) Send(message string) error {
+func (c *client) Send(message []byte) error {
 	fmt.Printf("client %s sending: %s\n", c.id, message)
 	return nil
 }
@@ -83,6 +83,7 @@ func TestPubSub_Subscribe(t *testing.T) {
 	ps.Subscribe(c1, "0|1")
 	ps.Subscribe(c1, "0|2")
 	ps.Subscribe(c1, "0|3")
+	ps.Publish("0|0", []byte("This is a test message"))
 
 	if len(ps.lists["c1"]) != 4 {
 		t.Errorf("Tried to add subscrbiptions to c1. Expected 4, but got %d", len(ps.lists["c1"]))
