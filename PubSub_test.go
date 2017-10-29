@@ -1,17 +1,19 @@
 package pubsub
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 )
 
 type client struct {
-	id string
+	id  string // return this string on ID()
+	err error  // Return this error on Send()
 }
 
 func (c *client) Send(message []byte) error {
 	fmt.Printf("client %s sending: %s\n", c.id, message)
-	return nil
+	return c.err
 }
 func (c *client) ID() string {
 	return c.id
@@ -19,8 +21,8 @@ func (c *client) ID() string {
 
 func TestPubSub_Subscribe(t *testing.T) {
 	ps := NewPubSub()
-	c1 := &client{"c1"}
-	c2 := &client{"c2"}
+	c1 := &client{"c1", nil}
+	c2 := &client{"c2", nil}
 
 	ps.Subscribe(c1, "0|0")
 	channel, ok := ps.channels["0|0"]
@@ -101,5 +103,32 @@ func TestPubSub_Subscribe(t *testing.T) {
 	}
 	if len(ps.channels["0|1"]) != 0 {
 		t.Errorf("Expeted the 0|1 channel to have no agents after removing c1, but found %d", len(ps.channels["0|1"]))
+	}
+}
+
+func TestPubSub_RemoveAllBadAgents(t *testing.T) {
+	ps := NewPubSub()
+	c1 := &client{"c1", errors.New("expected error")}
+	ps.Subscribe(c1, "0|0")
+	ps.Publish("0|0", []byte("This is a test message"))
+
+	// When an agent returns an error, it should be added to the badAgents list,
+	// but not removed from ps or or ps.lists
+	if agent, okay := ps.badAgents[c1.ID()]; !okay || agent != c1 {
+		t.Errorf("Agent reutned an error on publish, but was not found in badAgents list. Instead we got %v, %v", agent, okay)
+	}
+	if _, okay := ps.lists[c1.ID()]; !okay {
+		t.Error("Agent reutned an error on publish, but was not found in lists list")
+	}
+	if agent, okay := ps.channels["0|0"][c1.ID()]; !okay || agent != c1 {
+		t.Error("Expected to find c1 in channel prior to RemoveAllBadAgents")
+	}
+	//
+	badAgents := ps.RemoveAllBadAgents()
+	if len(badAgents) != 1 || len(ps.badAgents) != 0 || len(ps.lists) != 0 {
+		t.Error("Expected bad agents to be removed from ps, and returned")
+	}
+	if len(ps.channels["0|0"]) != 0 {
+		t.Errorf("Expected channel to still exist, but agent to be removed after call to RemoveAllBadAgents. instead found %v", ps.channels["0|0"])
 	}
 }
