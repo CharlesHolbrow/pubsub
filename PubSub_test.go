@@ -24,9 +24,12 @@ func TestPubSub_Subscribe(t *testing.T) {
 	c1 := &client{"c1", nil}
 	c2 := &client{"c2", nil}
 
-	ps.Subscribe(c1, "0|0")
-	channel, ok := ps.channels["0|0"]
+	changed := ps.Subscribe(c1, "0|0")
+	if !changed {
+		t.Error("Subscribe returned changed=false when adding the first agent to 0|0")
+	}
 
+	channel, ok := ps.channels["0|0"]
 	if !ok {
 		t.Error("expected Subscribe() to create channel")
 	}
@@ -35,11 +38,10 @@ func TestPubSub_Subscribe(t *testing.T) {
 		t.Errorf("expected channel %s to be inserted, but found %s", *c1, channel["c1"])
 	}
 
-	var err error
-	err = ps.Subscribe(c2, "0|0")
+	changed = ps.Subscribe(c2, "0|0")
 
-	if err != nil {
-		t.Error("Got an error when we tried to subscribe a second agent", err)
+	if changed {
+		t.Error("Subscribe returned changed=true, when subscribing a second agent to a channel")
 	}
 
 	// The channel should already exist
@@ -70,9 +72,9 @@ func TestPubSub_Subscribe(t *testing.T) {
 		t.Errorf("Expected c1 list to have 1|1 subscriptions")
 	}
 	ps.Unsubscribe(c1, "1|1")
-	// the channel should still exist, but it should not have agent c1 in it
-	if len(ps.channels["1|1"]) != 0 {
-		t.Errorf("Tried to unsubscribe, but 1|1 channel still has %d", len(ps.channels["1|1"]))
+	// the channel should not exist
+	if ps.channels["1|1"] != nil {
+		t.Error("Tried to unsubscribe, but channel 1|1 still exists")
 	}
 	if len(ps.lists["c1"]) != 1 {
 		t.Errorf("Tried to unsibscribe, but c1 list still has %d subscriptions", len(ps.lists["c1"]))
@@ -109,8 +111,16 @@ func TestPubSub_Subscribe(t *testing.T) {
 func TestPubSub_RemoveAllBadAgents(t *testing.T) {
 	ps := NewPubSub()
 	c1 := &client{"c1", errors.New("expected error")}
-	ps.Subscribe(c1, "0|0")
+	c2 := &client{"c2", nil}
+
+	ps.Subscribe(c1, "0|0") // only c1 is subscribed
+	ps.Subscribe(c1, "1|1") // both agents are subscribed to c2
+	ps.Subscribe(c2, "1|1")
 	ps.Publish("0|0", []byte("This is a test message"))
+
+	if len(ps.channels["1|1"]) != 2 {
+		t.Errorf("Expected 1|1 channel to have two agents before unsubscribe. found %d", len(ps.channels["1|1"]))
+	}
 
 	// When an agent returns an error, it should be added to the badAgents list,
 	// but not removed from ps or or ps.lists
@@ -125,10 +135,13 @@ func TestPubSub_RemoveAllBadAgents(t *testing.T) {
 	}
 	//
 	badAgents := ps.RemoveAllBadAgents()
-	if len(badAgents) != 1 || len(ps.badAgents) != 0 || len(ps.lists) != 0 {
+	if len(badAgents) != 1 || len(ps.badAgents) != 0 || len(ps.lists) != 1 {
 		t.Error("Expected bad agents to be removed from ps, and returned")
 	}
-	if len(ps.channels["0|0"]) != 0 {
-		t.Errorf("Expected channel to still exist, but agent to be removed after call to RemoveAllBadAgents. instead found %v", ps.channels["0|0"])
+	if ps.channels["0|0"] != nil {
+		t.Errorf("Expected channel to not exist")
+	}
+	if len(ps.channels["1|1"]) != 1 {
+		t.Errorf("Expected 1|1 channel to have one agent after unsubscribe")
 	}
 }

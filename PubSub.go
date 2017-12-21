@@ -69,18 +69,19 @@ func (ps *PubSub) Publish(sKey string, message []byte) int {
 }
 
 // Add a client to a subscription key. Assumes you have a write Lock
-func (ps *PubSub) subscribe(subscriber Agent, key string) error {
+func (ps *PubSub) subscribe(subscriber Agent, key string) (changed bool) {
 	subscriberID := subscriber.ID()
 	channel, ok := ps.channels[key]
 
 	if !ok {
 		channel = make(pubSubChannel)
 		ps.channels[key] = channel
+		changed = true
 	}
 
 	// check if we are already subscribed
 	if _, ok := channel[subscriberID]; ok {
-		return fmt.Errorf("Agent ID %s is already subscribed to %s", subscriberID, key)
+		return
 	}
 
 	channel[subscriberID] = subscriber
@@ -94,32 +95,46 @@ func (ps *PubSub) subscribe(subscriber Agent, key string) error {
 
 	subscriberSubscriptions[key] = channel
 
-	return nil
+	return
 }
 
-// Subscribe the supplied Agent to channel identified by key
-func (ps *PubSub) Subscribe(agent Agent, key string) error {
+// Subscribe the supplied Agent to channel identified by key. Returns true if
+// a previously unsubscribed channel was created. Else return false.
+func (ps *PubSub) Subscribe(agent Agent, key string) (changed bool) {
 	ps.lock.Lock()
-	changed := ps.subscribe(agent, key)
-	ps.lock.Unlock()
-	return changed
+	defer ps.lock.Unlock()
+	return ps.subscribe(agent, key)
 }
 
 // assumes you have a write lock
-func (ps *PubSub) unsubscribe(agent Agent, key string) {
-	// list is a collection of all the channels this agent is subscribed to
+func (ps *PubSub) unsubscribe(agent Agent, key string) (changed bool) {
 	agentID := agent.ID()
-	list := ps.lists[agentID]
 
-	delete(list[key], agentID)
-	delete(list, key)
+	// channel is a map of all agents subscribed to this key
+	if channel, ok := ps.channels[key]; ok {
+		delete(channel, agent.ID())
+		if len(channel) == 0 {
+			delete(ps.channels, key) // Channel has no subscribed agents
+			changed = true
+		}
+	}
+
+	// list is a collection of all the channels this agent is subscribed to
+	if list, ok := ps.lists[agentID]; ok {
+		delete(list, key)
+		if len(list) == 0 {
+			delete(ps.lists, agentID) // Agent is subscribed to 0 channels
+		}
+	}
+
+	return
 }
 
-// Unsubscribe the supplied agent from
-func (ps *PubSub) Unsubscribe(agent Agent, key string) {
+// Unsubscribe the supplied agent from the given channel.
+func (ps *PubSub) Unsubscribe(agent Agent, key string) (changed bool) {
 	ps.lock.Lock()
-	ps.unsubscribe(agent, key)
-	ps.lock.Unlock()
+	defer ps.lock.Unlock()
+	return ps.unsubscribe(agent, key)
 }
 
 // RemoveAgent removes an agent from ps and ubsubscribes it from all channels.
@@ -130,11 +145,8 @@ func (ps *PubSub) Unsubscribe(agent Agent, key string) {
 // the agent are removed from ps.
 func (ps *PubSub) RemoveAgent(agent Agent) error {
 	ps.lock.Lock()
-
-	err := ps.removeAgent(agent)
-
-	ps.lock.Unlock()
-	return err
+	defer ps.lock.Unlock()
+	return ps.removeAgent(agent)
 }
 
 func (ps *PubSub) removeAgent(agent Agent) error {
@@ -146,9 +158,17 @@ func (ps *PubSub) removeAgent(agent Agent) error {
 		return fmt.Errorf("Tried to remove agent (ID: %s) from all subscriptions, but subscription list not found", agentID)
 	}
 
-	for _, psChan := range list {
+	// list is a collection of all the channels this agent is subscribed to
+	for channelName, psChan := range list {
+		// psChan is a map[idString]Agent
 		delete(psChan, agentID)
+		if len(psChan) == 0 {
+			delete(list, channelName)
+			delete(ps.channels, channelName)
+		}
+
 	}
+
 	delete(ps.lists, agentID)
 	return nil
 }

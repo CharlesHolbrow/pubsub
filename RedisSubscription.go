@@ -75,7 +75,7 @@ func (rs *RedisSubscription) Flush() {
 	rs.rpsLocker.Lock()
 	defer rs.rpsLocker.Unlock()
 
-	// Lock this object while we mutatue it
+	// Lock this object while we mutate it
 	rs.pendingLocker.Lock()
 	add := rs.pendignAdd.clear()
 	rem := rs.pendingRem.clear()
@@ -91,5 +91,7 @@ func (rs *RedisSubscription) Flush() {
 		rs.rps.Unsubscribe(rem...)
 	}
 
+	// even if add and rem were nil, flush will allow goroutines waiting on
+	// .Suspend() calls to return.
 	flush <- true
 }
