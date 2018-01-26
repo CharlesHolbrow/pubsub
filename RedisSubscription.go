@@ -9,12 +9,12 @@ import (
 // A Receiver is any function that handles incoming messages from redis
 type Receiver func(string, []byte)
 
-// RedisSubscription provides a nice way to subscribe to redis. An instance of
-// this struct can subscribe and unsubscribe from many redis channels.
+// RedisSubscription provides a nice way to subscribe to redis. This allows us
+// to use a single redis connection to subscribe and unsubscribe to many
+// different redis channels. The subscribe and unsubscribe methods are
+// Synchronous, and are safe for concurrent calls.
 //
 // New instances should be created with NewRedisSubscription(...)
-//
-// The subscribe and unsubscribe methods are synchronous.
 type RedisSubscription struct {
 	rps           *redis.PubSubConn
 	rpsLocker     sync.Mutex
