@@ -16,7 +16,7 @@ func newKeys() *keys {
 
 // return a slice if strigs in check, but not keys.db. nil if none.
 //
-// needs read lock
+// acquires read lock
 func (k *keys) missing(check ...string) (result []string) {
 	k.mutex.RLock()
 	for _, c := range check {
@@ -33,7 +33,7 @@ func (k *keys) missing(check ...string) (result []string) {
 
 // Return a slice of strings in both keys.db and check. If none, return nil.
 //
-// needs ReadLock
+// acquires ReadLock
 func (k *keys) intersection(check ...string) (result []string) {
 	k.mutex.RLock()
 	for _, c := range check {
@@ -63,7 +63,7 @@ func (k *keys) rem(strings ...string) {
 
 // Remove all keys, and return a slice of them
 //
-// needs write lock
+// aquires write lock
 func (k *keys) clear() []interface{} {
 	k.mutex.Lock()
 	result := make([]interface{}, 0, len(k.db))

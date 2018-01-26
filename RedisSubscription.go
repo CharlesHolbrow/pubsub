@@ -6,11 +6,15 @@ import (
 	"github.com/garyburd/redigo/redis"
 )
 
+// A Receiver is any function that handles incoming messages from redis
 type Receiver func(string, []byte)
 
-// RedisSubscription provides a nice way to subscribe to redis
+// RedisSubscription provides a nice way to subscribe to redis. An instance of
+// this struct can subscribe and unsubscribe from many redis channels.
 //
-// The subscribe and unsubscribe methods are synchronous
+// New instances should be created with NewRedisSubscription(...)
+//
+// The subscribe and unsubscribe methods are synchronous.
 type RedisSubscription struct {
 	rps           *redis.PubSubConn
 	rpsLocker     sync.Mutex
@@ -22,7 +26,8 @@ type RedisSubscription struct {
 	flushLocker   sync.Mutex
 }
 
-// NewRedisSubscription adds a subscription to the
+// NewRedisSubscription creates a RedisSubscription
+// The calling code is responsible for closeing the redis connection
 func NewRedisSubscription(conn redis.Conn, onReceive Receiver) *RedisSubscription {
 	sub := &RedisSubscription{
 		rps:        &redis.PubSubConn{Conn: conn},
@@ -35,8 +40,15 @@ func NewRedisSubscription(conn redis.Conn, onReceive Receiver) *RedisSubscriptio
 	// pipe all the receive calls to the onReceive method
 	go func() {
 		for {
-			if message, ok := sub.rps.Receive().(redis.Message); ok {
-				sub.onReceive(message.Channel, message.Data)
+			switch v := sub.rps.Receive().(type) {
+			case redis.Message:
+				sub.onReceive(v.Channel, v.Data)
+			case error:
+				panic("Error encountered in RedisSubscription: " + v.Error())
+			case redis.PMessage:
+				// pattern message
+			case redis.Subscription:
+				// Redis is confirming our subscription v.Channel, v.Kind, v.Count
 			}
 		}
 	}()
@@ -82,7 +94,8 @@ func (rs *RedisSubscription) Flush() {
 	flush := rs.flush
 	rs.flush = make(chan bool)
 	rs.pendingLocker.Unlock()
-	// We are done mutating this struct
+	// We are done mutating this struct. But we cannot unlock rpsLocker yet,
+	// because have yet to communicate with redis.
 
 	if add != nil {
 		rs.rps.Subscribe(add...)
