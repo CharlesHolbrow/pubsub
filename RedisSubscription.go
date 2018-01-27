@@ -11,8 +11,13 @@ type Receiver func(string, []byte)
 
 // RedisSubscription provides a nice way to subscribe to redis. This allows us
 // to use a single redis connection to subscribe and unsubscribe to many
-// different redis channels. The subscribe and unsubscribe methods are
-// Synchronous, and are safe for concurrent calls.
+// different redis channels.
+// - Subscribe method is synchronous (it blocks until then next call to Flush)
+// - Unsubscribe method ques channels to be unsubscribed, but does not block
+// - Flush method resolves all pending subscribes and unsubscribes
+// - All exported methods are safe for concurrent calls.
+//
+// Panics if there is an error with redis connection.
 //
 // New instances should be created with NewRedisSubscription(...)
 type RedisSubscription struct {
@@ -20,14 +25,14 @@ type RedisSubscription struct {
 	rpsLocker     sync.Mutex
 	pendignAdd    *keys
 	pendingRem    *keys
-	pendingLocker sync.RWMutex
+	pendingLocker sync.Mutex
 	onReceive     Receiver
 	flush         chan bool
 	flushLocker   sync.Mutex
 }
 
-// NewRedisSubscription creates a RedisSubscription
-// The calling code is responsible for closeing the redis connection
+// NewRedisSubscription creates and initializes a RedisSubscription
+// Panic on error receiveing from redis (and close conn)
 func NewRedisSubscription(conn redis.Conn, onReceive Receiver) *RedisSubscription {
 	sub := &RedisSubscription{
 		rps:        &redis.PubSubConn{Conn: conn},
@@ -39,6 +44,7 @@ func NewRedisSubscription(conn redis.Conn, onReceive Receiver) *RedisSubscriptio
 
 	// pipe all the receive calls to the onReceive method
 	go func() {
+		defer sub.rps.Close()
 		for {
 			switch v := sub.rps.Receive().(type) {
 			case redis.Message:
@@ -56,8 +62,8 @@ func NewRedisSubscription(conn redis.Conn, onReceive Receiver) *RedisSubscriptio
 	return sub
 }
 
-// Subscribe adds the supplied keys to our redis subscription. It does not
-// return until the subscription is complete.
+// Subscribe adds the supplied keys to our redis subscription. Block until the
+// next call to Flush()
 func (rs *RedisSubscription) Subscribe(keys ...string) {
 	rs.pendingLocker.Lock()
 
@@ -80,7 +86,10 @@ func (rs *RedisSubscription) Unsubscribe(keys ...string) {
 }
 
 // Flush rationalizes all pending Subscribe and Unsubscribe requests. It also
-// causes all calls to .Subscribe to return once the subscription is complete.
+// allows all calls to .Subscribe to return once the subscription is complete.
+//
+// It only connects to redis IF there are pending changes. (My goal is to make
+// calls to Subscribe as light-weight as possible)
 func (rs *RedisSubscription) Flush() {
 	// I think it's worth locking redis pubsub for the entire duration of the
 	// flush call. This ensures that Flush is safe for concurrent calls
@@ -97,10 +106,11 @@ func (rs *RedisSubscription) Flush() {
 	// We are done mutating this struct. But we cannot unlock rpsLocker yet,
 	// because have yet to communicate with redis.
 
-	if add != nil {
+	// Talk to redis...
+	if len(add) > 0 { // len(nil) == 0
 		rs.rps.Subscribe(add...)
 	}
-	if rem != nil {
+	if len(rem) > 0 { // len(nil) == 0
 		rs.rps.Unsubscribe(rem...)
 	}
 
