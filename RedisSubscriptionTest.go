@@ -12,8 +12,8 @@ type tclient struct {
 	err error  // Return this error on Send()
 }
 
-func (c *tclient) Send(message []byte) error {
-	fmt.Printf("client %s sending: %s\n", c.id, message)
+func (c *tclient) Receive(message []byte) error {
+	fmt.Printf("client %s Received: %s\n", c.id, message)
 	return c.err
 }
 func (c *tclient) ID() string {
@@ -38,7 +38,7 @@ func RedisSubscriptionTest() {
 	conn2 := createConn()
 	defer conn2.Close()
 
-	rps := NewRedisPubSub(conn)
+	rps := NewRedisAgents(conn)
 	rps.Update(c1, []string{"hello", "world"}, nil)
 	rps.Update(c2, []string{"hi", "world"}, nil)
 

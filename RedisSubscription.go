@@ -104,14 +104,31 @@ func (rs *RedisSubscription) Flush() {
 	rs.flush = make(chan bool)
 	rs.pendingLocker.Unlock()
 	// We are done mutating this struct. But we cannot unlock rpsLocker yet,
-	// because have yet to communicate with redis.
+	// because we have not yet communicated with redis.
 
-	// Talk to redis...
-	if len(add) > 0 { // len(nil) == 0
-		rs.rps.Subscribe(add...)
+	// If both add and rem are empty, we do not need to talk to redis at all.
+	// If we do need to talk to redis, set pending=true. NOTE: len(nil) == 0.
+	var pending bool
+	var err error
+
+	if len(rem) > 0 {
+		if err = rs.rps.Conn.Send("UNSUBSCRIBE", rem...); err != nil {
+			panic("Error sending UNSUBSCRIBE message to redis:" + err.Error())
+		}
+		pending = true
 	}
-	if len(rem) > 0 { // len(nil) == 0
-		rs.rps.Unsubscribe(rem...)
+	if len(add) > 0 {
+		if err = rs.rps.Conn.Send("SUBSCRIBE", add...); err != nil {
+			panic("Error sending SUBSCRIBE message to redis: " + err.Error())
+		}
+		pending = true
+	}
+	if pending {
+		// We need to update our subscription with redis.
+		rs.rps.Conn.Flush()
+		if _, err := rs.rps.Conn.Receive(); err != nil {
+			panic("Error during redis subscription: " + err.Error())
+		}
 	}
 
 	// even if add and rem were nil, flush will allow goroutines waiting on
