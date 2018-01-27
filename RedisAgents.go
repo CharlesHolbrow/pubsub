@@ -6,7 +6,7 @@ import (
 	"github.com/garyburd/redigo/redis"
 )
 
-// RedisAgents allows many agents to subscribe to redis PUB/SUB channels. Agent
+// RedisAgents allows many Agents to subscribe to redis PUB/SUB channels. Agent
 // subscriptions are multiplexed to a single redis connection.
 type RedisAgents struct {
 	redisSubscription *RedisSubscription
@@ -19,24 +19,30 @@ type RedisAgents struct {
 // error.
 func NewRedisAgents(conn redis.Conn) *RedisAgents {
 	agentPubSub := NewPubSub()
-	redisSub := NewRedisSubscription(conn, func(channelName string, data []byte) {
+	redisSubscription := NewRedisSubscription(conn, func(channelName string, data []byte) {
 		agentPubSub.Publish(channelName, data)
 	})
 
 	go func() {
 		for {
+			// Note that if requests by a single agent come in too fast, they
+			// will accumulate, and we will quickly run out of memory.
 			time.Sleep(time.Millisecond * 6)
-			redisSub.Flush()
+			redisSubscription.Flush()
 		}
 	}()
 
 	return &RedisAgents{
 		agentPubSub:       agentPubSub,
-		redisSubscription: redisSub,
+		redisSubscription: redisSubscription,
 	}
 }
 
+// Update an Agent's subscriptions by adding or removing subscription keys. This
+// will update the redisSubscription iff needed.
 //
+// It is the caller's responsibility to ensure that no two Agents have the same
+// ID.
 func (rps *RedisAgents) Update(agent Agent, add []string, rem []string) {
 	var pendingAdd, pendingRem []string
 
@@ -60,6 +66,11 @@ func (rps *RedisAgents) Update(agent Agent, add []string, rem []string) {
 		}
 	}
 
-	rps.redisSubscription.Unsubscribe(pendingRem...)
-	rps.redisSubscription.Subscribe(pendingAdd...)
+	// .Subscribe will not return unill the next call to .Flush
+	if len(pendingRem) > 0 {
+		rps.redisSubscription.Unsubscribe(pendingRem...)
+	}
+	if len(pendingAdd) > 0 {
+		rps.redisSubscription.Subscribe(pendingAdd...)
+	}
 }
