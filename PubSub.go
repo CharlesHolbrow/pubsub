@@ -7,9 +7,12 @@ import (
 
 // Agent represents an object that can Subscribe to PubSub channels.
 // Agents must have a random ID that can be retrieved with ID(). If a client
-// connects, disconnects and re-connects it should have a different ID.
+// connects, disconnects and then re-connects, it should have a different ID.
 //
 // It is your responsibility to ensure that no two Agents have the same ID.
+//
+// Note that the Receive method blocks the send loop, so agent Receive methods
+// should be written to return quickly.
 type Agent interface {
 	Receive([]byte) error
 	ID() string
@@ -47,8 +50,8 @@ type pubSubChannel map[string]Agent
 // pubSubList is a collection of channels that an agent is subscribed to
 type pubSubList map[string]pubSubChannel
 
-// Publish calls subscriber.Send(message) on each subscriber in the subscription
-// channel identified by sKey. Safe for concurrent calls.
+// Publish calls subscriber.Receive(message) on each subscriber in the
+// subscription channel identified by sKey. Safe for concurrent calls.
 //
 // Returns the number of errors encountered trying to publish.
 //

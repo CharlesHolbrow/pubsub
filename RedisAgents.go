@@ -66,11 +66,12 @@ func (rps *RedisAgents) Update(agent Agent, add []string, rem []string) {
 		}
 	}
 
-	// .Subscribe will not return unill the next call to .Flush
+	// Update the redis subscription if needed.
 	if len(pendingRem) > 0 {
 		rps.redisSubscription.Unsubscribe(pendingRem...)
 	}
 	if len(pendingAdd) > 0 {
+		// .Subscribe will not return unill the next call to .Flush
 		rps.redisSubscription.Subscribe(pendingAdd...)
 	}
 }

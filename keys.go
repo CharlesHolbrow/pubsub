@@ -14,7 +14,7 @@ func newKeys() *keys {
 	}
 }
 
-// return a slice if strigs in check, but not keys.db. nil if none.
+// Return a slice of strigs in check, but not keys.db. nil if none.
 //
 // acquires read lock
 func (k *keys) missing(check ...string) (result []string) {
