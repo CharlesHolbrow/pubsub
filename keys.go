@@ -47,18 +47,22 @@ func (k *keys) intersection(check ...string) (result []string) {
 	return result
 }
 
-// needs write lock
+// aquires write lock
 func (k *keys) add(strings ...string) {
+	k.mutex.Lock()
 	for _, key := range strings {
 		k.db[key] = true
 	}
+	k.mutex.Unlock()
 }
 
-// needs write lock
+// aquires write lock
 func (k *keys) rem(strings ...string) {
+	k.mutex.Lock()
 	for _, key := range strings {
 		delete(k.db, key)
 	}
+	k.mutex.Unlock()
 }
 
 // Remove all keys, and return a slice of them
