@@ -25,7 +25,7 @@ func publish(c redis.Conn, channelName, message string) {
 }
 
 func Test_RedisSubscription(t *testing.T) {
-	clients := nNewClients(1000)
+	clients := nNewClients(5000)
 	fmt.Printf("Created %d new clients\n", len(clients))
 
 	// Create two redis connections, one for subscribing, on
@@ -38,18 +38,15 @@ func Test_RedisSubscription(t *testing.T) {
 
 	// subscribe every client to it's name
 	group := sync.WaitGroup{}
-	group.Add(len(clients) - 1)
+	group.Add(len(clients))
 
 	for _, client := range clients {
 		go func(client *tclient) {
 			add := make([]string, 2)
 			add[0] = "all"
 			add[1] = client.ID()
-			fmt.Println("Preparing to update:", client.ID())
 			redisAgents.Update(client, add, nil)
-			fmt.Println("Updated:", client.ID())
 			group.Done()
-			fmt.Println("OK")
 		}(client)
 	}
 	group.Wait()

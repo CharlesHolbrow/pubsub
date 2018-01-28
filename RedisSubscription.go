@@ -56,7 +56,7 @@ func NewRedisSubscription(conn redis.Conn, onReceive Receiver) *RedisSubscriptio
 			case redis.PMessage:
 				// pattern message
 			case redis.Subscription:
-				// Redis is confirming our subscription v.Channel, v.Kind, v.Count
+				// Redis is confirming our subscription v.Channel, v.Kind ("subscribe"), v.Count
 			}
 		}
 	}()
@@ -134,9 +134,20 @@ func (rs *RedisSubscription) Flush() {
 		}
 		// Note that we do not rs.rps.Conn.Receive() here,
 		// because this is handled by the redis.PubSubConn
+
+		// IMPORTANT NOTE ABOUT SCALING REDIS
+		// I'm not currently waiting for confirmation that we are actually
+		// subscribed. I think this is fine for when we are using a single
+		// instance of redis. My current understanding is that because redis is
+		// single threaded we can assume that once the call to Flush() returns
+		// we will receive all future published messages on the specified
+		// channels. If redis is running in cluster mode I would need to think
+		// about this more. At the very least I would need to wait until we
+		// received the subscription confirmation from redis before closing the
+		// the flush channel.
 	}
 
 	// even if add and rem are nil, flush to allow goroutines waiting on
 	// .Suspend() calls to return.
-	flush <- true
+	close(flush)
 }
