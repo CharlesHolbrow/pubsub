@@ -13,7 +13,7 @@ type Receiver func(string, []byte)
 // to use a single redis connection to subscribe and unsubscribe to many
 // different redis channels.
 // - Subscribe method is synchronous (it blocks until the next call to Flush)
-// - Unsubscribe method queues channels to unsubscribed, but does not block
+// - Unsubscribe method queues channels to unsubscribe, but does not block
 // - Flush method resolves all pending subscribes and unsubscribes
 // - All exported methods are safe for concurrent calls.
 //
