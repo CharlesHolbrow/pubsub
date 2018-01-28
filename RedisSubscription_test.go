@@ -2,7 +2,7 @@ package pubsub
 
 import (
 	"fmt"
-	"time"
+	"testing"
 
 	"github.com/garyburd/redigo/redis"
 )
@@ -28,7 +28,7 @@ func createConn() redis.Conn {
 	return c
 }
 
-func RedisSubscriptionTest() {
+func Test_RedisSubscription(t *testing.T) {
 	c1 := &tclient{"c1", nil}
 	c2 := &tclient{"c2", nil}
 
@@ -39,11 +39,15 @@ func RedisSubscriptionTest() {
 	defer conn2.Close()
 
 	rps := NewRedisAgents(conn)
+	fmt.Println("Before Update")
 	rps.Update(c1, []string{"hello", "world"}, nil)
+	fmt.Println("Middle")
 	rps.Update(c2, []string{"hi", "world"}, nil)
+	fmt.Println("After")
 
 	r, e := conn2.Do("PUBLISH", "world", "This is a message!!")
 	fmt.Printf("Result: %s\tErr:%v\n", r, e)
 
-	time.Sleep(time.Minute * 60)
+	// time.Sleep(time.Second)
+	// t.Error("Should Fail!")
 }
