@@ -12,7 +12,7 @@ type client struct {
 }
 
 func (c *client) Receive(message []byte) error {
-	fmt.Printf("client %s sending: %s\n", c.id, message)
+	fmt.Printf("Client %s Received: %s\n", c.id, message)
 	return c.err
 }
 func (c *client) ID() string {

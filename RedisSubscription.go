@@ -12,8 +12,8 @@ type Receiver func(string, []byte)
 // RedisSubscription provides a nice way to subscribe to redis. This allows us
 // to use a single redis connection to subscribe and unsubscribe to many
 // different redis channels.
-// - Subscribe method is synchronous (it blocks until then next call to Flush)
-// - Unsubscribe method ques channels to be unsubscribed, but does not block
+// - Subscribe method is synchronous (it blocks until the next call to Flush)
+// - Unsubscribe method queues channels to unsubscribed, but does not block
 // - Flush method resolves all pending subscribes and unsubscribes
 // - All exported methods are safe for concurrent calls.
 //
@@ -21,14 +21,15 @@ type Receiver func(string, []byte)
 //
 // New instances should be created with NewRedisSubscription(...)
 type RedisSubscription struct {
-	rps           *redis.PubSubConn
-	rpsLocker     sync.Mutex
+	// redigo connections are not concurrency safe, so we lock access
+	rpsLocker sync.Mutex
+	rps       *redis.PubSubConn
+
+	// pendingLocker controlls access to key sets and to the flush channel
+	pendingLocker sync.Mutex
+	flush         chan bool
 	pendignAdd    *keys
 	pendingRem    *keys
-	pendingLocker sync.Mutex
-	onReceive     Receiver
-	flush         chan bool
-	flushLocker   sync.Mutex
 }
 
 // NewRedisSubscription creates and initializes a RedisSubscription
@@ -38,7 +39,6 @@ func NewRedisSubscription(conn redis.Conn, onReceive Receiver) *RedisSubscriptio
 		rps:        &redis.PubSubConn{Conn: conn},
 		pendignAdd: newKeys(),
 		pendingRem: newKeys(),
-		onReceive:  onReceive,
 		flush:      make(chan bool),
 	}
 
@@ -48,7 +48,7 @@ func NewRedisSubscription(conn redis.Conn, onReceive Receiver) *RedisSubscriptio
 		for {
 			switch v := sub.rps.Receive().(type) {
 			case redis.Message:
-				sub.onReceive(v.Channel, v.Data)
+				onReceive(v.Channel, v.Data)
 			case error:
 				panic("Error encountered in RedisSubscription: " + v.Error())
 			case redis.PMessage:
@@ -72,6 +72,7 @@ func (rs *RedisSubscription) Subscribe(keys ...string) {
 
 	flush := rs.flush
 	rs.pendingLocker.Unlock()
+
 	<-flush // wait for flush....
 }
 
@@ -123,15 +124,17 @@ func (rs *RedisSubscription) Flush() {
 		}
 		pending = true
 	}
+
 	if pending {
 		// We need to update our subscription with redis.
-		rs.rps.Conn.Flush()
-		if _, err := rs.rps.Conn.Receive(); err != nil {
-			panic("Error during redis subscription: " + err.Error())
+		if err = rs.rps.Conn.Flush(); err != nil {
+			panic("Error during flush to send redis subscription: " + err.Error())
 		}
+		// Note that we do not rs.rps.Conn.Receive() here,
+		// because this is handled by the redis.PubSubConn
 	}
 
-	// even if add and rem were nil, flush will allow goroutines waiting on
+	// even if add and rem are nil, flush to allow goroutines waiting on
 	// .Suspend() calls to return.
 	flush <- true
 }
