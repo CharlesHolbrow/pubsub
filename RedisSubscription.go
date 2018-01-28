@@ -33,7 +33,9 @@ type RedisSubscription struct {
 }
 
 // NewRedisSubscription creates and initializes a RedisSubscription
-// Panic on error receiveing from redis (and close conn)
+// Panic on error receiveing from redis
+//
+// It is the responsibility of the calling code to close the redis connection.
 func NewRedisSubscription(conn redis.Conn, onReceive Receiver) *RedisSubscription {
 	sub := &RedisSubscription{
 		rps:        &redis.PubSubConn{Conn: conn},
@@ -44,13 +46,13 @@ func NewRedisSubscription(conn redis.Conn, onReceive Receiver) *RedisSubscriptio
 
 	// pipe all the receive calls to the onReceive method
 	go func() {
-		defer sub.rps.Close()
+		defer sub.rps.Unsubscribe() // unsubscribe from all channels. Good idea?
 		for {
 			switch v := sub.rps.Receive().(type) {
 			case redis.Message:
 				onReceive(v.Channel, v.Data)
 			case error:
-				panic("Error encountered in RedisSubscription: " + v.Error())
+				panic("Error encountered Receiveing RedisSubscription: " + v.Error())
 			case redis.PMessage:
 				// pattern message
 			case redis.Subscription:

@@ -1,6 +1,7 @@
 package pubsub
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/garyburd/redigo/redis"
@@ -27,8 +28,9 @@ func NewRedisAgents(conn redis.Conn) *RedisAgents {
 		for {
 			// Note that if requests by a single agent come in too fast, they
 			// will accumulate, and we will quickly run out of memory.
-			time.Sleep(time.Millisecond * 6)
+			time.Sleep(time.Millisecond * 100)
 			redisSubscription.Flush()
+			fmt.Println("Flushed!")
 		}
 	}()
 
