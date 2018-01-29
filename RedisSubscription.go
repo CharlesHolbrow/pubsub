@@ -52,6 +52,11 @@ func NewRedisSubscription(conn redis.Conn, onReceive Receiver) *RedisSubscriptio
 			case redis.Message:
 				onReceive(v.Channel, v.Data)
 			case error:
+				// If the connection is closed, we will receive an error. This
+				// seems to happen occasionally when the calling code decides to
+				// close the connection. The connection shold probably be closed
+				// in this goroutine. However, I'm not sure if receiving an
+				// error here implies that the connectino is already closed.
 				panic("Error encountered Receiveing RedisSubscription: " + v.Error())
 			case redis.PMessage:
 				// pattern message
