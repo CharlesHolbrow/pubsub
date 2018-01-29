@@ -56,7 +56,7 @@ func NewRedisSubscription(conn redis.Conn, onReceive Receiver) *RedisSubscriptio
 				// seems to happen occasionally when the calling code decides to
 				// close the connection. The connection shold probably be closed
 				// in this goroutine. However, I'm not sure if receiving an
-				// error here implies that the connectino is already closed.
+				// error here implies that the connection is already closed.
 				panic("Error encountered Receiveing RedisSubscription: " + v.Error())
 			case redis.PMessage:
 				// pattern message
@@ -147,7 +147,7 @@ func (rs *RedisSubscription) Flush() {
 		// single threaded we can assume that once the call to Flush() returns
 		// we will receive all future published messages on the specified
 		// channels. If redis is running in cluster mode I would need to think
-		// about this more. At the very least I would need to wait until we
+		// about this more. At the very least I would want to wait until we
 		// received the subscription confirmation from redis before closing the
 		// the flush channel.
 	}
