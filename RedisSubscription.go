@@ -6,9 +6,6 @@ import (
 	"github.com/garyburd/redigo/redis"
 )
 
-// A Receiver is any function that handles incoming messages from redis
-type Receiver func(string, []byte)
-
 // RedisSubscription provides a nice way to subscribe to redis. This allows us
 // to use a single redis connection to subscribe and unsubscribe to many
 // different redis channels.
@@ -30,34 +27,50 @@ type RedisSubscription struct {
 	flush         chan bool
 	pendignAdd    *keys
 	pendingRem    *keys
+
+	closeRequested *toggle
 }
 
 // NewRedisSubscription creates and initializes a RedisSubscription
-// Panic on error receiveing from redis
 //
-// It is the responsibility of the calling code to close the redis connection.
+// Panics if it receives an error from redis.
+// Automatically closes conn when we receive an error, or call .Close()
 func NewRedisSubscription(conn redis.Conn, onReceive Receiver) *RedisSubscription {
-	sub := &RedisSubscription{
-		rps:        &redis.PubSubConn{Conn: conn},
-		pendignAdd: newKeys(),
-		pendingRem: newKeys(),
-		flush:      make(chan bool),
+	rs := &RedisSubscription{
+		rps:            &redis.PubSubConn{Conn: conn},
+		pendignAdd:     newKeys(),
+		pendingRem:     newKeys(),
+		flush:          make(chan bool),
+		closeRequested: &toggle{},
 	}
 
-	// pipe all the receive calls to the onReceive method
+	// Pipe all the receive calls to the onReceive method
 	go func() {
-		defer sub.rps.Unsubscribe() // unsubscribe from all channels. Good idea?
+		// From reading the source code, I believe the redigo conn.Close()
+		// method IS safe for concurrent calls, but the redigo docs are
+		// unclear. It is safe to call redigo.Conn.Close() more than once
+		// (subsequent calls will return a non-nil error).
+		defer rs.rps.Close()
 		for {
-			switch v := sub.rps.Receive().(type) {
+			switch v := rs.rps.Receive().(type) {
 			case redis.Message:
 				onReceive(v.Channel, v.Data)
 			case error:
-				// If the connection is closed, we will receive an error. This
-				// seems to happen occasionally when the calling code decides to
-				// close the connection. The connection shold probably be closed
-				// in this goroutine. However, I'm not sure if receiving an
-				// error here implies that the connection is already closed.
-				panic("Error encountered Receiveing RedisSubscription: " + v.Error())
+				if rs.closeRequested.Get() {
+					return
+				}
+				if rs.rps.Conn.Err() == nil {
+					// This is a recoverable error. I considered calling
+					// sub.rps.Unsubscribe() here, but we are in the receieving
+					// goroutine, not the sending goroutine, so I think it's
+					// better to just give up on the connection, because we are
+					// not allowed to send anything from this goroutine. This
+					// means we should never use Conn from a connection pool.
+					panic("RedisSubscription: Error encountered: " + v.Error())
+				} else {
+					// unrecoverable error. for example, someone closed the connection
+					panic("RedisSubscription: Connection error encountered: " + v.Error())
+				}
 			case redis.PMessage:
 				// pattern message
 			case redis.Subscription:
@@ -66,7 +79,7 @@ func NewRedisSubscription(conn redis.Conn, onReceive Receiver) *RedisSubscriptio
 		}
 	}()
 
-	return sub
+	return rs
 }
 
 // Subscribe adds the supplied keys to our redis subscription. Block until the
@@ -155,4 +168,31 @@ func (rs *RedisSubscription) Flush() {
 	// even if add and rem are nil, flush to allow goroutines waiting on
 	// .Suspend() calls to return.
 	close(flush)
+}
+
+// Close the connection, and do not panic. Subsequent calls to Close return nil.
+func (rs *RedisSubscription) Close() (err error) {
+	if rs.closeRequested.Set(true) {
+		err = rs.rps.Close()
+	}
+	return
+}
+
+type toggle struct {
+	state bool
+	mu    sync.Mutex
+}
+
+func (t *toggle) Set(v bool) (previous bool) {
+	t.mu.Lock()
+	previous = t.state
+	t.state = v
+	t.mu.Unlock()
+	return
+}
+func (t *toggle) Get() (v bool) {
+	t.mu.Lock()
+	v = t.state
+	t.mu.Unlock()
+	return
 }

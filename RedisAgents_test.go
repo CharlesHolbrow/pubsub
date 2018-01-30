@@ -33,12 +33,11 @@ func TestRedisAgents_Update(t *testing.T) {
 	fmt.Printf("Created %d new clients\n", len(clients))
 
 	// Create two redis connections, one for subscribing, one for publishing.
-	conn := createConn()
-	defer conn.Close()
+	conn := createConn() // Will be closed by RedisSubscription
+	redisAgents := NewRedisAgents(conn)
+
 	publisher := createConn()
 	defer publisher.Close()
-
-	redisAgents := NewRedisAgents(conn)
 
 	// subscribe every client to it's name
 	group := sync.WaitGroup{}
@@ -110,7 +109,7 @@ func nNewClients(n int, c *counter) []*tclient {
 // tclient is an Agent used for testing.
 type tclient struct {
 	id  string // return this string on ID()
-	err error  // Return this error on Send()
+	err error  // Return this error on Receive()
 
 	// store all received messages
 	sync.Mutex
@@ -120,6 +119,7 @@ type tclient struct {
 	totalReceived *counter
 }
 
+// Push a string onto the internal data storage. Safe for concurrent calls.
 func (c *tclient) Push(msg string) {
 	c.Lock()
 	if c.data == nil {
@@ -139,7 +139,7 @@ func (c *tclient) String() string {
 	return strings.Join(c.data, ", ")
 }
 
-func (c *tclient) Receive(message []byte) error {
+func (c *tclient) Receive(channel string, message []byte) error {
 	c.Push(string(message))
 	c.totalReceived.Inc()
 	return c.err
@@ -153,6 +153,12 @@ func (c *tclient) Length() int {
 
 func (c *tclient) ID() string {
 	return c.id
+}
+
+func (c *tclient) SetError(err error) {
+	c.Lock()
+	c.err = err
+	c.Unlock()
 }
 
 // Counter is a minimal benchmarking tool for benchmarking asychronous events.

@@ -2,7 +2,7 @@ package pubsub
 
 import "sync"
 
-// keys is a collection of strings. methods are safe for concurrent calls.
+// keys is a set of strings. methods are safe for concurrent calls.
 type keys struct {
 	db    map[string]bool
 	mutex sync.RWMutex

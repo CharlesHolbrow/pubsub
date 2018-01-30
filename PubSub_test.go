@@ -11,7 +11,7 @@ type client struct {
 	err error  // Return this error on Send()
 }
 
-func (c *client) Receive(message []byte) error {
+func (c *client) Receive(channel string, message []byte) error {
 	fmt.Printf("Client %s Received: %s\n", c.id, message)
 	return c.err
 }

@@ -5,19 +5,6 @@ import (
 	"sync"
 )
 
-// Agent represents an object that can Subscribe to PubSub channels.
-// Agents must have a random ID that can be retrieved with ID(). If a client
-// connects, disconnects and then re-connects, it should have a different ID.
-//
-// It is your responsibility to ensure that no two Agents have the same ID.
-//
-// Note that the Receive method blocks the send loop, so agent Receive methods
-// should be written to return quickly.
-type Agent interface {
-	Receive([]byte) error
-	ID() string
-}
-
 // PubSub stores a collection of subscription keys, each containing a collection
 // of subscribers. Methods should all be safe for concurrent calls.
 type PubSub struct {
@@ -62,7 +49,7 @@ func (ps *PubSub) Publish(sKey string, message []byte) int {
 	badAgentCount := 0
 	if psChannel, ok := ps.channels[sKey]; ok {
 		for id, subscriber := range psChannel {
-			err := subscriber.Receive(message)
+			err := subscriber.Receive(sKey, message)
 			if err != nil {
 				ps.badAgents[id] = subscriber
 				badAgentCount++
