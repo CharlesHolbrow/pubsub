@@ -134,7 +134,7 @@ func TestPubSub_RemoveAllBadAgents(t *testing.T) {
 		t.Error("Expected to find c1 in channel prior to RemoveAllBadAgents")
 	}
 	//
-	badAgents := ps.RemoveAllBadAgents()
+	badAgents, removedChannels := ps.RemoveAllBadAgents()
 	if len(badAgents) != 1 || len(ps.badAgents) != 0 || len(ps.lists) != 1 {
 		t.Error("Expected bad agents to be removed from ps, and returned")
 	}
@@ -143,5 +143,11 @@ func TestPubSub_RemoveAllBadAgents(t *testing.T) {
 	}
 	if len(ps.channels["1|1"]) != 1 {
 		t.Errorf("Expected 1|1 channel to have one agent after unsubscribe")
+	}
+	if removedChannels[0] != "0|0" {
+		t.Error("Expeted 0|0 channel to be in removed channels result")
+	}
+	if len(ps.emptyChannels) != 0 || ps.emptyChannels == nil {
+		t.Error("Expected ps.emptyChannels to be initialized to empty map")
 	}
 }

@@ -11,6 +11,10 @@ type PubSub struct {
 	// The subscription channels by subKey
 	channels map[string]pubSubChannel
 
+	// When we remove an agent, we want to keep track of which channels are now
+	// empty. For each empty channel, we will add an entry to this collection.
+	emptyChannels map[string]pubSubChannel
+
 	// lists of subscriptions by their agent's IDs. Note that these are different
 	// than the Subscriber interface. These are just a collection of
 	// pubSubChannels
@@ -25,9 +29,10 @@ type PubSub struct {
 // NewPubSub creates a PubSub message broker
 func NewPubSub() *PubSub {
 	return &PubSub{
-		channels:  make(map[string]pubSubChannel),
-		lists:     make(map[string]pubSubList),
-		badAgents: make(map[string]Agent),
+		channels:      make(map[string]pubSubChannel),
+		emptyChannels: make(map[string]pubSubChannel),
+		lists:         make(map[string]pubSubList),
+		badAgents:     make(map[string]Agent),
 	}
 }
 
@@ -66,9 +71,20 @@ func (ps *PubSub) subscribe(subscriber Agent, key string) (changed bool) {
 	channel, ok := ps.channels[key]
 
 	if !ok {
-		channel = make(pubSubChannel)
+		// Do we already have this channel in the emptyChannels collection?
+		if emptyChannel, ok := ps.channels[key]; ok {
+			// The channel already exists, we just have to move it from the
+			// emptyChannels collection back to the channels collection.
+			channel = emptyChannel
+			delete(ps.emptyChannels, key)
+			// Do not set changed = true. We did not actually change anything.
+		} else {
+			// we need to create a new channel
+			channel = make(pubSubChannel)
+			changed = true
+		}
+
 		ps.channels[key] = channel
-		changed = true
 	}
 
 	// check if we are already subscribed
@@ -141,6 +157,8 @@ func (ps *PubSub) RemoveAgent(agent Agent) error {
 	return ps.removeAgent(agent)
 }
 
+// For each channel that is emptied as a result of this operation, add that
+// channel to ps.emptyChannels
 func (ps *PubSub) removeAgent(agent Agent) error {
 	agentID := agent.ID()
 
@@ -152,32 +170,46 @@ func (ps *PubSub) removeAgent(agent Agent) error {
 
 	// list is a collection of all the channels this agent is subscribed to
 	for channelName, psChan := range list {
-		// psChan is a map[idString]Agent
-		delete(psChan, agentID)
-		if len(psChan) == 0 {
-			delete(list, channelName)
-			delete(ps.channels, channelName)
-		}
+		// For every channel that the agent is subscribed to...
 
+		// Remove the channel from the agent's channel list. This might not
+		// actually be needed, because we remove the entire agent list below.
+		delete(list, channelName)
+
+		// psChan is a map[idString]Agent
+		delete(psChan, agentID) // for each channel, remove the agent
+
+		// is the channel now empty?
+		if len(psChan) == 0 {
+			// Channel has 0 agents.
+			// Move channel to emptyChannels
+			delete(ps.channels, channelName)
+			ps.emptyChannels[channelName] = psChan
+		}
 	}
 
 	delete(ps.lists, agentID)
 	return nil
 }
 
-// RemoveAllBadAgents finds all the agents labeled as "bad"
+// RemoveAllBadAgents finds and removes all the agents labeled as "bad".
 //
 // Bad agents are returned in a collection, and a new empty badAgent collection
-// is allocated.
+// is allocated. Nil if there are no Bad Agents.
 //
-// Returns nil if there are no Bad Agents
-func (ps *PubSub) RemoveAllBadAgents() map[string]Agent {
+// Removed Channels will be listed in the []string. Will be nil if no channels
+// were removed.
+func (ps *PubSub) RemoveAllBadAgents() (map[string]Agent, []string) {
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
 
 	badAgents := ps.badAgents
 	if len(badAgents) == 0 {
-		return nil
+		// Is it possible to have 0 bad agents, but to have one or more empty
+		// channels? I'm thinking this is not possible, but it could use a bit
+		// more thought. For now, if there are no bad agents, we simply return
+		// nil for both the agent list and for the emptied channels.
+		return nil, nil
 	}
 	ps.badAgents = make(map[string]Agent)
 	for _, agent := range badAgents {
@@ -186,5 +218,15 @@ func (ps *PubSub) RemoveAllBadAgents() map[string]Agent {
 		ps.removeAgent(agent)
 	}
 
-	return badAgents
+	// If we have any emptied channels, store their names in a string slice.
+	var emptyChannels []string
+	if len(ps.emptyChannels) > 0 {
+		emptyChannels = make([]string, 0, len(ps.emptyChannels))
+		for channelName := range ps.emptyChannels {
+			emptyChannels = append(emptyChannels, channelName)
+		}
+		ps.emptyChannels = make(map[string]pubSubChannel)
+	}
+
+	return badAgents, emptyChannels
 }
