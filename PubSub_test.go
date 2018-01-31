@@ -24,11 +24,7 @@ func TestPubSub_Subscribe(t *testing.T) {
 	c1 := &client{"c1", nil}
 	c2 := &client{"c2", nil}
 
-	changed := ps.Subscribe(c1, "0|0")
-	if !changed {
-		t.Error("Subscribe returned changed=false when adding the first agent to 0|0")
-	}
-
+	ps.Subscribe(c1, "0|0")
 	channel, ok := ps.channels["0|0"]
 	if !ok {
 		t.Error("expected Subscribe() to create channel")
@@ -38,12 +34,7 @@ func TestPubSub_Subscribe(t *testing.T) {
 		t.Errorf("expected channel %s to be inserted, but found %s", *c1, channel["c1"])
 	}
 
-	changed = ps.Subscribe(c2, "0|0")
-
-	if changed {
-		t.Error("Subscribe returned changed=true, when subscribing a second agent to a channel")
-	}
-
+	ps.Subscribe(c2, "0|0")
 	// The channel should already exist
 	if len(ps.channels) != 1 {
 		t.Errorf("expected there to be a single channel")
@@ -134,7 +125,7 @@ func TestPubSub_RemoveAllBadAgents(t *testing.T) {
 		t.Error("Expected to find c1 in channel prior to RemoveAllBadAgents")
 	}
 	//
-	badAgents, removedChannels := ps.RemoveAllBadAgents()
+	badAgents := ps.RemoveAllBadAgents()
 	if len(badAgents) != 1 || len(ps.badAgents) != 0 || len(ps.lists) != 1 {
 		t.Error("Expected bad agents to be removed from ps, and returned")
 	}
@@ -143,11 +134,5 @@ func TestPubSub_RemoveAllBadAgents(t *testing.T) {
 	}
 	if len(ps.channels["1|1"]) != 1 {
 		t.Errorf("Expected 1|1 channel to have one agent after unsubscribe")
-	}
-	if removedChannels[0] != "0|0" {
-		t.Error("Expeted 0|0 channel to be in removed channels result")
-	}
-	if len(ps.emptyChannels) != 0 || ps.emptyChannels == nil {
-		t.Error("Expected ps.emptyChannels to be initialized to empty map")
 	}
 }

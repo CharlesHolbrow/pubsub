@@ -6,28 +6,17 @@ import (
 	"github.com/garyburd/redigo/redis"
 )
 
-// RedisSubscription provides a nice way to subscribe to redis. This allows us
-// to use a single redis connection to subscribe and unsubscribe to many
-// different redis channels.
-// - Subscribe method is synchronous (it blocks until the next call to Flush)
-// - Unsubscribe method queues channels to unsubscribe, but does not block
-// - Flush method resolves all pending subscribes and unsubscribes
-// - All exported methods are safe for concurrent calls.
+// RedisSubscription provides a nice way to subscribe to redis.
 //
 // Panics if there is an error with redis connection.
 //
 // New instances should be created with NewRedisSubscription(...)
 type RedisSubscription struct {
 	// redigo connections are not concurrency safe, so we lock access
-	rpsLocker sync.Mutex
-	rps       *redis.PubSubConn
+	sync.Mutex
+	rps *redis.PubSubConn
 
-	// pendingLocker controlls access to key sets and to the flush channel
-	pendingLocker sync.Mutex
-	flush         chan bool
-	pendignAdd    *keys
-	pendingRem    *keys
-
+	// keep track of if the user requested we close the connection
 	closeRequested *toggle
 }
 
@@ -38,9 +27,6 @@ type RedisSubscription struct {
 func NewRedisSubscription(conn redis.Conn, onReceive Receiver) *RedisSubscription {
 	rs := &RedisSubscription{
 		rps:            &redis.PubSubConn{Conn: conn},
-		pendignAdd:     newKeys(),
-		pendingRem:     newKeys(),
-		flush:          make(chan bool),
 		closeRequested: &toggle{},
 	}
 
@@ -82,63 +68,39 @@ func NewRedisSubscription(conn redis.Conn, onReceive Receiver) *RedisSubscriptio
 	return rs
 }
 
-// Subscribe adds the supplied keys to our redis subscription. Block until the
-// next call to Flush()
-func (rs *RedisSubscription) Subscribe(keys ...string) {
-	rs.pendingLocker.Lock()
-
-	rs.pendingRem.rem(keys...) // write lock
-	rs.pendignAdd.add(keys...) // write lock
-
-	flush := rs.flush
-	rs.pendingLocker.Unlock()
-
-	<-flush // wait for flush....
-}
-
-// Unsubscribe removes the supplied keys from our redis subscription. Unlike
-// Subscribe, it returns immediately. The included keys will be removed at the
-// next call to .Flush()
-func (rs *RedisSubscription) Unsubscribe(keys ...string) {
-	rs.pendingLocker.Lock()
-	rs.pendignAdd.rem(keys...) // write lock
-	rs.pendingRem.add(keys...) // write lock
-	rs.pendingLocker.Unlock()
-}
-
-// Flush rationalizes all pending Subscribe and Unsubscribe requests. It also
-// allows all calls to .Subscribe to return once the subscription is complete.
+// Update the subscription by adding and removing channel Names
+//
+// First remove remNames from the subscription, then add addNames.
 //
 // It only connects to redis IF there are pending changes. (My goal is to make
 // calls to Subscribe as light-weight as possible)
-func (rs *RedisSubscription) Flush() {
+func (rs *RedisSubscription) Update(addNames, remNames []string) {
 	// I think it's worth locking redis pubsub for the entire duration of the
 	// flush call. This ensures that Flush is safe for concurrent calls
-	rs.rpsLocker.Lock()
-	defer rs.rpsLocker.Unlock()
-
-	// Lock this object while we mutate it
-	rs.pendingLocker.Lock()
-	add := rs.pendignAdd.clear()
-	rem := rs.pendingRem.clear()
-	flush := rs.flush
-	rs.flush = make(chan bool)
-	rs.pendingLocker.Unlock()
-	// We are done mutating this struct. But we cannot unlock rpsLocker yet,
-	// because we have not yet communicated with redis.
+	rs.Lock()
+	defer rs.Unlock()
 
 	// If both add and rem are empty, we do not need to talk to redis at all.
 	// If we do need to talk to redis, set pending=true. NOTE: len(nil) == 0.
 	var pending bool
 	var err error
 
-	if len(rem) > 0 {
+	if len(remNames) > 0 {
+		rem := make([]interface{}, len(remNames))
+		for i, name := range remNames {
+			rem[i] = name
+		}
 		if err = rs.rps.Conn.Send("UNSUBSCRIBE", rem...); err != nil {
 			panic("Error sending UNSUBSCRIBE message to redis:" + err.Error())
 		}
 		pending = true
 	}
-	if len(add) > 0 {
+
+	if len(addNames) > 0 {
+		add := make([]interface{}, len(addNames))
+		for i, name := range addNames {
+			add[i] = name
+		}
 		if err = rs.rps.Conn.Send("SUBSCRIBE", add...); err != nil {
 			panic("Error sending SUBSCRIBE message to redis: " + err.Error())
 		}
@@ -164,10 +126,6 @@ func (rs *RedisSubscription) Flush() {
 		// received the subscription confirmation from redis before closing the
 		// the flush channel.
 	}
-
-	// even if add and rem are nil, flush to allow goroutines waiting on
-	// .Suspend() calls to return.
-	close(flush)
 }
 
 // Close the connection, and do not panic. Subsequent calls to Close return nil.
@@ -178,6 +136,7 @@ func (rs *RedisSubscription) Close() (err error) {
 	return
 }
 
+// toggle
 type toggle struct {
 	state bool
 	mu    sync.Mutex

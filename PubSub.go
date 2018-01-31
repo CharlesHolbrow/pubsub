@@ -5,15 +5,14 @@ import (
 	"sync"
 )
 
-// PubSub stores a collection of subscription keys, each containing a collection
+// PubSub stores a collection of channels, each containing a collection
 // of subscribers. Methods should all be safe for concurrent calls.
 type PubSub struct {
+	// Lock for channels, emptyChannels, lists and badAgents, pendingAdd/Rem
+	lock sync.RWMutex
+
 	// The subscription channels by subKey
 	channels map[string]pubSubChannel
-
-	// When we remove an agent, we want to keep track of which channels are now
-	// empty. For each empty channel, we will add an entry to this collection.
-	emptyChannels map[string]pubSubChannel
 
 	// lists of subscriptions by their agent's IDs. Note that these are different
 	// than the Subscriber interface. These are just a collection of
@@ -23,20 +22,21 @@ type PubSub struct {
 	// when we publish put all agents that returned errors here
 	badAgents map[string]Agent
 
-	lock sync.RWMutex
+	// Diff since last resolve. True means Added. False means removed.
+	pending map[string]bool
 }
 
 // NewPubSub creates a PubSub message broker
 func NewPubSub() *PubSub {
 	return &PubSub{
-		channels:      make(map[string]pubSubChannel),
-		emptyChannels: make(map[string]pubSubChannel),
-		lists:         make(map[string]pubSubList),
-		badAgents:     make(map[string]Agent),
+		channels:  make(map[string]pubSubChannel),
+		lists:     make(map[string]pubSubList),
+		badAgents: make(map[string]Agent),
+		pending:   make(map[string]bool),
 	}
 }
 
-// pubSubChannel is a collection of subscribers organized by subscription key
+// pubSubChannel is a collection of subscribers organized by agent id
 type pubSubChannel map[string]Agent
 
 // pubSubList is a collection of channels that an agent is subscribed to
@@ -65,26 +65,24 @@ func (ps *PubSub) Publish(sKey string, message []byte) int {
 	return badAgentCount
 }
 
-// Add a client to a subscription key. Assumes you have a write Lock
-func (ps *PubSub) subscribe(subscriber Agent, key string) (changed bool) {
+// Add a client to a channel. Assumes you have a write Lock
+func (ps *PubSub) subscribe(subscriber Agent, channelName string) {
 	subscriberID := subscriber.ID()
-	channel, ok := ps.channels[key]
+	channel, ok := ps.channels[channelName]
 
 	if !ok {
-		// Do we already have this channel in the emptyChannels collection?
-		if emptyChannel, ok := ps.channels[key]; ok {
-			// The channel already exists, we just have to move it from the
-			// emptyChannels collection back to the channels collection.
-			channel = emptyChannel
-			delete(ps.emptyChannels, key)
-			// Do not set changed = true. We did not actually change anything.
-		} else {
-			// we need to create a new channel
-			channel = make(pubSubChannel)
-			changed = true
-		}
+		// we need to create a new channel
+		channel = make(pubSubChannel)
+		ps.channels[channelName] = channel
 
-		ps.channels[key] = channel
+		if pending, ok := ps.pending[channelName]; ok && !pending {
+			// we added this channel since the last flush
+			delete(ps.pending, channelName)
+		} else if !ok {
+			ps.pending[channelName] = true
+		} else if ok && pending {
+			panic("pubsub.PubSub.subscribe found an invalid state")
+		}
 	}
 
 	// check if we are already subscribed
@@ -101,35 +99,46 @@ func (ps *PubSub) subscribe(subscriber Agent, key string) (changed bool) {
 		ps.lists[subscriberID] = subscriberSubscriptions
 	}
 
-	subscriberSubscriptions[key] = channel
+	subscriberSubscriptions[channelName] = channel
 
 	return
 }
 
-// Subscribe the supplied Agent to channel identified by key. Returns true if
-// a previously unsubscribed channel was created. Else return false.
-func (ps *PubSub) Subscribe(agent Agent, key string) (changed bool) {
+// Subscribe the supplied Agent to channel identified by channelName.
+func (ps *PubSub) Subscribe(agent Agent, channelName string) {
 	ps.lock.Lock()
-	defer ps.lock.Unlock()
-	return ps.subscribe(agent, key)
+	ps.subscribe(agent, channelName)
+	ps.lock.Unlock()
 }
 
 // assumes you have a write lock
-func (ps *PubSub) unsubscribe(agent Agent, key string) (changed bool) {
+func (ps *PubSub) unsubscribe(agent Agent, channelName string) {
 	agentID := agent.ID()
 
-	// channel is a map of all agents subscribed to this key
-	if channel, ok := ps.channels[key]; ok {
+	// channel is a map of all agents subscribed to this channelName
+	if channel, ok := ps.channels[channelName]; ok {
 		delete(channel, agent.ID())
+
+		// Is the channel empty?
 		if len(channel) == 0 {
-			delete(ps.channels, key) // Channel has no subscribed agents
-			changed = true
+			// Channel has no subscribed agents. Delete it.
+			delete(ps.channels, channelName)
+			// Update the pending diff
+			if pending, ok := ps.pending[channelName]; ok && pending {
+				// The channel was added after the last flush
+				delete(ps.pending, channelName)
+			} else if !ok {
+				// We need to send a 'remove' message for this channel.
+				ps.pending[channelName] = false
+			} else if ok && !pending {
+				panic("pubsub.PubSub.unsubscribe with an invalid state.")
+			}
 		}
 	}
 
 	// list is a collection of all the channels this agent is subscribed to
 	if list, ok := ps.lists[agentID]; ok {
-		delete(list, key)
+		delete(list, channelName)
 		if len(list) == 0 {
 			delete(ps.lists, agentID) // Agent is subscribed to 0 channels
 		}
@@ -139,10 +148,10 @@ func (ps *PubSub) unsubscribe(agent Agent, key string) (changed bool) {
 }
 
 // Unsubscribe the supplied agent from the given channel.
-func (ps *PubSub) Unsubscribe(agent Agent, key string) (changed bool) {
+func (ps *PubSub) Unsubscribe(agent Agent, channelName string) {
 	ps.lock.Lock()
-	defer ps.lock.Unlock()
-	return ps.unsubscribe(agent, key)
+	ps.unsubscribe(agent, channelName)
+	ps.lock.Unlock()
 }
 
 // RemoveAgent removes an agent from ps and ubsubscribes it from all channels.
@@ -157,8 +166,6 @@ func (ps *PubSub) RemoveAgent(agent Agent) error {
 	return ps.removeAgent(agent)
 }
 
-// For each channel that is emptied as a result of this operation, add that
-// channel to ps.emptyChannels
 func (ps *PubSub) removeAgent(agent Agent) error {
 	agentID := agent.ID()
 
@@ -182,9 +189,17 @@ func (ps *PubSub) removeAgent(agent Agent) error {
 		// is the channel now empty?
 		if len(psChan) == 0 {
 			// Channel has 0 agents.
-			// Move channel to emptyChannels
 			delete(ps.channels, channelName)
-			ps.emptyChannels[channelName] = psChan
+			// Update the pending diff
+			if pending, ok := ps.pending[channelName]; ok && pending {
+				// The channel was added after the last flush
+				delete(ps.pending, channelName)
+			} else if !ok {
+				// We need to send a 'remove' message for this channel.
+				ps.pending[channelName] = false
+			} else if ok && !pending {
+				panic("pubsub.PubSub.unsubscribe with an invalid state.")
+			}
 		}
 	}
 
@@ -196,20 +211,17 @@ func (ps *PubSub) removeAgent(agent Agent) error {
 //
 // Bad agents are returned in a collection, and a new empty badAgent collection
 // is allocated. Nil if there are no Bad Agents.
-//
-// Removed Channels will be listed in the []string. Will be nil if no channels
-// were removed.
-func (ps *PubSub) RemoveAllBadAgents() (map[string]Agent, []string) {
+func (ps *PubSub) RemoveAllBadAgents() map[string]Agent {
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
+	return ps.removeAllBadAgents()
+}
 
+// assumes you have a write lock.
+func (ps *PubSub) removeAllBadAgents() map[string]Agent {
 	badAgents := ps.badAgents
 	if len(badAgents) == 0 {
-		// Is it possible to have 0 bad agents, but to have one or more empty
-		// channels? I'm thinking this is not possible, but it could use a bit
-		// more thought. For now, if there are no bad agents, we simply return
-		// nil for both the agent list and for the emptied channels.
-		return nil, nil
+		return nil
 	}
 	ps.badAgents = make(map[string]Agent)
 	for _, agent := range badAgents {
@@ -218,15 +230,30 @@ func (ps *PubSub) RemoveAllBadAgents() (map[string]Agent, []string) {
 		ps.removeAgent(agent)
 	}
 
-	// If we have any emptied channels, store their names in a string slice.
-	var emptyChannels []string
-	if len(ps.emptyChannels) > 0 {
-		emptyChannels = make([]string, 0, len(ps.emptyChannels))
-		for channelName := range ps.emptyChannels {
-			emptyChannels = append(emptyChannels, channelName)
-		}
-		ps.emptyChannels = make(map[string]pubSubChannel)
-	}
+	return badAgents
+}
 
-	return badAgents, emptyChannels
+// Flush returns a diff since the last call to flush, of all the channels that
+// have been added or removed.
+//
+// If there are no changes, add and rem will both be nil.
+func (ps *PubSub) Flush() (add, rem []string) {
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+
+	if len(ps.pending) == 0 {
+		return
+	}
+	add = make([]string, 0, len(ps.pending))
+	rem = make([]string, 0, len(ps.pending))
+
+	for pending, tf := range ps.pending {
+		if tf {
+			add = append(add, pending)
+		} else {
+			rem = append(rem, pending)
+		}
+	}
+	ps.pending = make(map[string]bool)
+	return
 }
