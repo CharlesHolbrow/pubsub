@@ -72,6 +72,13 @@ func (redisAgents *RedisAgents) Update(agent Agent, add []string, rem []string) 
 	<-flush
 }
 
+// RemoveAgent removes an agent, and unsubscribes it from all channels. The
+// agent will immediately stop receiveing messages. Any unused redis channels
+// will by unsubscribed on the next Flush.
+func (redisAgents *RedisAgents) RemoveAgent(agent Agent) error {
+	return redisAgents.agentPubSub.RemoveAgent(agent)
+}
+
 // Flush Updates the redis subscription by adding and removing channels so the
 // redis subscription matches the agent subscription.
 //
