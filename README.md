@@ -1,8 +1,11 @@
-# PubSub
+# pubsub
 
-Concurrency safe multiplexer for redis publish subscribe.
+Publish/subscribe library with concurrency safe multiplexer for redis channels.
 
-Designed to "fan out" redis pubsub subscriptions to many clients.
+Designed to "fan out" redis subscriptions channels to many clients.
+
+Use case: Browser clients connected to a web server subscribe to redis pubsub channels.
+Redis is not performant to open one connection to redis per client ([why?](http://tech.trivago.com/2017/01/25/learn-redis-the-hard-way-in-production/). If each client needs to be subscribed to a different set of channels, this package is designed to be an intermediary between redis and the webserver.
 
 Hello World:
 
