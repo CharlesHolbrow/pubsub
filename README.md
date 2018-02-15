@@ -53,7 +53,7 @@ func main() {
   rSub.Update(c2, []string{"ch1", "ch3"}, nil)
   time.Sleep(20 * time.Second)
 
-  // After there are no agents subscribed to `ch1`, we the underlying redis
+  // After there are no agents subscribed to `ch1`, the underlying redis
   // connection will be also be unsubscribed from the `ch1` redis channel.
   fmt.Println("Unsubscribe both channels from ch1")
   rSub.Update(c1, nil, []string{"ch1"})
