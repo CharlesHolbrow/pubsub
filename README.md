@@ -28,7 +28,7 @@ func (c agent) ID() string {
 
 func (c agent) Receive(channel string, data []byte) error {
   fmt.Printf("agent %s received: (%s) %s\n", c.id, channel, data)
-  // if an
+  // If an error is returned, the agent will be removed from all subscriptions.
   return nil
 }
 
