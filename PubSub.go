@@ -7,6 +7,11 @@ import (
 
 // PubSub stores a collection of channels, each containing a collection
 // of subscribers. Methods should all be safe for concurrent calls.
+//
+// PubSub keeps track of the channels that we subscribe and unsubscribe to.
+// Notice how the  `Flush() (add, rem []string)` method can be used to get
+// the difference between the current subscription, and the subscrition at
+// the last call to `Flush()`.
 type PubSub struct {
 	// Lock for channels, emptyChannels, lists and badAgents, pendingAdd/Rem
 	lock sync.RWMutex
@@ -234,7 +239,8 @@ func (ps *PubSub) removeAllBadAgents() map[string]Agent {
 }
 
 // Flush returns a diff since the last call to flush, of all the channels that
-// have been added or removed.
+// have been added or removed. The result should be accurate even if sent subscribe
+// or unsubscribe request redundantly.
 //
 // If there are no changes, add and rem will both be nil.
 func (ps *PubSub) Flush() (add, rem []string) {
