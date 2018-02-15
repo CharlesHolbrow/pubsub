@@ -2,12 +2,17 @@
 
 Publish/subscribe library with concurrency safe multiplexer for redis channels.
 
-Designed to "fan out" redis subscriptions channels to many clients.
+## Goal
 
-Use case: Browser clients connected to a web server subscribe to redis pubsub channels.
-Redis is not performant to open one connection to redis per client ([why?](http://tech.trivago.com/2017/01/25/learn-redis-the-hard-way-in-production/). If each client needs to be subscribed to a different set of channels, this package is designed to be an intermediary between redis and the webserver.
+"Fan out" redis subscriptions channels to many clients.
 
-Hello World:
+## Use Case
+
+Browser clients connected to a web server subscribe to redis pubsub channels.
+
+Redis is not made to have many simultaneous open connections ([why?](http://tech.trivago.com/2017/01/25/learn-redis-the-hard-way-in-production/)). If each client needs to be subscribed to a different set of channels, this package can be an intermediary between redis and the webserver.
+
+## Hello World Example
 
 ```go
 package main
